@@ -1,0 +1,22 @@
+{
+  "name": "quilzo-vendor-dashboard",
+  "version": "1.0.0",
+  "description": "Electron wrapper for Quilzo vendor dashboard - keeps order notification sounds working when window is unfocused",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "build": {
+    "appId": "com.quilzo.vendordashboard",
+    "productName": "Quilzo Vendor",
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}
