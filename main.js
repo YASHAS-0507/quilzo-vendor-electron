@@ -42,6 +42,11 @@ function createWindow() {
     if (input.control && input.shift && input.key.toLowerCase() === 'd') {
       devModeEnabled = !devModeEnabled;
       console.log('Dev mode:', devModeEnabled ? 'ON' : 'OFF');
+      if (devModeEnabled) {
+        mainWindow.webContents.openDevTools();
+      } else {
+        mainWindow.webContents.closeDevTools();
+      }
       return;
     }
     // Block F12 / Ctrl+Shift+I unless dev mode is on
