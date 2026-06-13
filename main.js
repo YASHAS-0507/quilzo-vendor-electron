@@ -24,6 +24,34 @@ function createWindow() {
 
   mainWindow.loadURL(DASHBOARD_URL);
 
+  // ── SECURITY HARDENING ──
+  // 1. Block all downloads (always on)
+  mainWindow.webContents.session.on('will-download', (event) => {
+    event.preventDefault();
+  });
+
+  // 2 & 3. Right-click menu + DevTools — toggleable via Ctrl+Shift+D
+  let devModeEnabled = false;
+
+  mainWindow.webContents.on('context-menu', (e) => {
+    if (!devModeEnabled) e.preventDefault();
+  });
+
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    // Toggle dev mode with Ctrl+Shift+D
+    if (input.control && input.shift && input.key.toLowerCase() === 'd') {
+      devModeEnabled = !devModeEnabled;
+      console.log('Dev mode:', devModeEnabled ? 'ON' : 'OFF');
+      return;
+    }
+    // Block F12 / Ctrl+Shift+I unless dev mode is on
+    if (!devModeEnabled) {
+      if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        event.preventDefault();
+      }
+    }
+  });
+
   // Periodically reload the page so any pushed dashboard.html updates
   // (new JS/CSS/features) get picked up automatically without restarting.
   // Every 2 hours.
