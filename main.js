@@ -25,18 +25,31 @@ function createWindow() {
   mainWindow.loadURL(DASHBOARD_URL);
 
 // Heartbeat — keeps shop marked open while EXE is running
-let heartbeatInterval = setInterval(async () => {
+// Heartbeat — keeps shop marked open while EXE is running
+const https = require('https');
+function postToBackend(path) {
   try {
-    await fetch(`${DASHBOARD_URL.replace('/dashboard','/api/shop-heartbeat')}`, {method:'POST'});
+    const url = new URL(DASHBOARD_URL);
+    const options = {
+      hostname: url.hostname,
+      port: 443,
+      path: path,
+      method: 'POST',
+      headers: { 'Content-Length': 0 }
+    };
+    const req = https.request(options, () => {});
+    req.on('error', () => {});
+    req.end();
   } catch(e) {}
+}
+
+let heartbeatInterval = setInterval(() => {
+  postToBackend('/api/shop-heartbeat');
 }, 60000);
 
-// Close shop cleanly when EXE exits
-app.on('before-quit', async () => {
+app.on('before-quit', () => {
   clearInterval(heartbeatInterval);
-  try {
-    await fetch(`${DASHBOARD_URL.replace('/dashboard','/api/shop-close')}`, {method:'POST'});
-  } catch(e) {}
+  postToBackend('/api/shop-close');
 });
 
   // ── SECURITY HARDENING ──
