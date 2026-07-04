@@ -24,6 +24,21 @@ function createWindow() {
 
   mainWindow.loadURL(DASHBOARD_URL);
 
+// Heartbeat — keeps shop marked open while EXE is running
+let heartbeatInterval = setInterval(async () => {
+  try {
+    await fetch(`${DASHBOARD_URL.replace('/dashboard','/api/shop-heartbeat')}`, {method:'POST'});
+  } catch(e) {}
+}, 60000);
+
+// Close shop cleanly when EXE exits
+app.on('before-quit', async () => {
+  clearInterval(heartbeatInterval);
+  try {
+    await fetch(`${DASHBOARD_URL.replace('/dashboard','/api/shop-close')}`, {method:'POST'});
+  } catch(e) {}
+});
+
   // ── SECURITY HARDENING ──
   // 1. Block all downloads (always on)
   mainWindow.webContents.session.on('will-download', (event) => {
