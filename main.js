@@ -188,6 +188,7 @@ function createWindow() {
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.control && input.shift && input.key.toLowerCase() === 'd') {
+      event.preventDefault();
       devModeEnabled = !devModeEnabled;
       console.log('Dev mode:', devModeEnabled ? 'ON' : 'OFF');
       if (devModeEnabled) {
