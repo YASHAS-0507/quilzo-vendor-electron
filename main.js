@@ -15,7 +15,7 @@ function loadSettings() {
       return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
     }
   } catch(e) {}
-  return { printerOrder: [], bwPrinterOrder: [], colorPrinterOrder: [] };
+  return { printerOrder: [], bwPrinterOrder: [], colorPrinterOrder: [], a3PrinterOrder: [] };
 }
 
 function saveSettings(settings) {
@@ -34,15 +34,20 @@ async function getAvailablePrinters(webContents) {
   }
 }
 
-async function selectBestPrinter(webContents, print_type = 'BW') {
+async function selectBestPrinter(webContents, print_type = 'BW', paper_size = 'A4') {
   const settings = loadSettings();
   const printers = await getAvailablePrinters(webContents);
 
   if (!printers || printers.length === 0) return null;
 
-  const pool = print_type === 'Color'
-    ? (settings.colorPrinterOrder || [])
-    : (settings.bwPrinterOrder || []);
+  let pool;
+  if (paper_size === 'A3') {
+    pool = settings.a3PrinterOrder || [];
+  } else if (print_type === 'Color') {
+    pool = settings.colorPrinterOrder || [];
+  } else {
+    pool = settings.bwPrinterOrder || [];
+  }
 
   const orderedNames = pool.length > 0 ? pool : (settings.printerOrder || printers.map(p => p.name));
   const printerMap = {};
@@ -67,10 +72,11 @@ async function smartPrint(pdfWindow, options = {}) {
     side = 'double',
     copies = 1,
     print_type = 'BW',
+    paper_size = 'A4',
   } = options;
 
-  const printerName = await selectBestPrinter(pdfWindow.webContents, print_type);
-  console.log(`[PRINT] Selected printer: ${printerName} | orientation: ${orientation} | side: ${side} | print_type: ${print_type}`);
+  const printerName = await selectBestPrinter(pdfWindow.webContents, print_type, paper_size);
+  console.log(`[PRINT] Selected printer: ${printerName} | orientation: ${orientation} | side: ${side} | print_type: ${print_type} | paper_size: ${paper_size}`);
 
   const printOptions = {
     silent: true,
@@ -78,7 +84,7 @@ async function smartPrint(pdfWindow, options = {}) {
     deviceName: printerName || '',
     copies: parseInt(copies) || 1,
     landscape: orientation === 'landscape',
-    pageSize: 'A4',
+    pageSize: paper_size === 'A3' ? { width: 297000, height: 420000 } : 'A4',
     duplexMode: side === 'double' ? 'longEdge' : 'simplex',
     margins: { marginType: 'printableArea' },
     scaleFactor: 100,
@@ -119,6 +125,7 @@ function createWindow() {
       const side = urlObj.searchParams.get('side') || 'double';
       const copies = urlObj.searchParams.get('copies') || '1';
       const print_type = urlObj.searchParams.get('print_type') || 'BW';
+      const paper_size = urlObj.searchParams.get('paper_size') || 'A4';
 
       const pdfWin = new BrowserWindow({
         width: 900,
@@ -136,7 +143,7 @@ function createWindow() {
       // ── AUTO-PRINT: fires 2s after PDF finishes loading ──
       pdfWin.webContents.once('did-finish-load', () => {
         setTimeout(() => {
-          smartPrint(pdfWin, { orientation, side, copies, print_type })
+          smartPrint(pdfWin, { orientation, side, copies, print_type, paper_size })
             .then(result => {
               if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('print-success', result);
@@ -158,7 +165,7 @@ function createWindow() {
       pdfWin.webContents.on('before-input-event', (event, input) => {
         if (input.control && input.key.toLowerCase() === 'p') {
           event.preventDefault();
-          smartPrint(pdfWin, { orientation, side, copies, print_type })
+          smartPrint(pdfWin, { orientation, side, copies, print_type, paper_size })
             .then(result => {
               if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('print-success', result);
@@ -249,9 +256,10 @@ ipcMain.handle('get-printers', async () => {
       printerOrder: settings.printerOrder || [],
       bwPrinterOrder: settings.bwPrinterOrder || [],
       colorPrinterOrder: settings.colorPrinterOrder || [],
+      a3PrinterOrder: settings.a3PrinterOrder || [],
     };
   } catch(e) {
-    return { printers: [], printerOrder: [], bwPrinterOrder: [], colorPrinterOrder: [] };
+    return { printers: [], printerOrder: [], bwPrinterOrder: [], colorPrinterOrder: [], a3PrinterOrder: [] };
   }
 });
 
@@ -260,6 +268,7 @@ ipcMain.handle('set-printer-order', async (event, payload) => {
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
     if (payload.bwPrinterOrder)    settings.bwPrinterOrder    = payload.bwPrinterOrder;
     if (payload.colorPrinterOrder) settings.colorPrinterOrder = payload.colorPrinterOrder;
+    if (payload.a3PrinterOrder)    settings.a3PrinterOrder    = payload.a3PrinterOrder;
   } else if (Array.isArray(payload)) {
     settings.printerOrder = payload;
   }
@@ -267,7 +276,7 @@ ipcMain.handle('set-printer-order', async (event, payload) => {
   return { success: true };
 });
 
-ipcMain.handle('print-pdf', async (event, { url, orientation, side, copies, print_type }) => {
+ipcMain.handle('print-pdf', async (event, { url, orientation, side, copies, print_type, paper_size }) => {
   const pdfWin = new BrowserWindow({
     width: 900,
     height: 700,
@@ -278,7 +287,7 @@ ipcMain.handle('print-pdf', async (event, { url, orientation, side, copies, prin
   await pdfWin.loadURL(url);
 
   try {
-    const result = await smartPrint(pdfWin, { orientation, side, copies, print_type });
+    const result = await smartPrint(pdfWin, { orientation, side, copies, print_type, paper_size });
     pdfWin.close();
     return result;
   } catch(e) {
