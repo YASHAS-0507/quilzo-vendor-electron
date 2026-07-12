@@ -76,19 +76,36 @@ async function smartPrint(pdfWindow, options = {}) {
   } = options;
 
   const printerName = await selectBestPrinter(pdfWindow.webContents, print_type, paper_size);
-  console.log(`[PRINT] Selected printer: ${printerName} | orientation: ${orientation} | side: ${side} | print_type: ${print_type} | paper_size: ${paper_size}`);
+  console.log(`[PRINT] printer=${printerName} | paper=${paper_size} | type=${print_type} | orientation=${orientation} | side=${side}`);
 
-  const printOptions = {
-    silent: true,
-    printBackground: true,
-    deviceName: printerName || '',
-    copies: parseInt(copies) || 1,
-    landscape: orientation === 'landscape',
-    pageSize: paper_size === 'A3' ? { width: 297000, height: 420000 } : 'A4',
-    duplexMode: side === 'double' ? 'longEdge' : 'simplex',
-    margins: { marginType: 'printableArea' },
-    scaleFactor: 100,
-  };
+  let printOptions;
+  if (paper_size === 'A3') {
+    // A3 engineering drawing — BIS/ISO standard settings
+    // Scale accuracy is critical: never scale, always single-side, no margin override
+    printOptions = {
+      silent: true,
+      printBackground: true,
+      deviceName: printerName || '',
+      copies: parseInt(copies) || 1,
+      landscape: orientation !== 'portrait', // default landscape for A3
+      pageSize: { width: 420000, height: 297000 }, // landscape A3 in microns
+      scaleFactor: 100,       // CRITICAL: never scale engineering drawings
+      duplexMode: 'simplex',  // always single-sided for A3 sheets
+      margins: { marginType: 'none' }, // drawing carries its own BIS margins
+    };
+  } else {
+    printOptions = {
+      silent: true,
+      printBackground: true,
+      deviceName: printerName || '',
+      copies: parseInt(copies) || 1,
+      landscape: orientation === 'landscape',
+      pageSize: 'A4',
+      duplexMode: side === 'double' ? 'longEdge' : 'simplex',
+      margins: { marginType: 'printableArea' },
+      scaleFactor: 100,
+    };
+  }
 
   return new Promise((resolve, reject) => {
     pdfWindow.webContents.print(printOptions, (success, errorType) => {
