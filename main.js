@@ -84,7 +84,8 @@ async function smartPrint(pdfWindow, options = {}) {
     // Scale accuracy is critical: never scale, always single-side, no margin override
     printOptions = {
       silent: true,
-      printBackground: true,
+      printBackground: false,
+      color: print_type === 'Color',
       deviceName: printerName || '',
       copies: parseInt(copies) || 1,
       landscape: orientation !== 'portrait', // default landscape for A3
@@ -96,7 +97,8 @@ async function smartPrint(pdfWindow, options = {}) {
   } else {
     printOptions = {
       silent: true,
-      printBackground: true,
+      printBackground: false,
+      color: print_type === 'Color',
       deviceName: printerName || '',
       copies: parseInt(copies) || 1,
       landscape: orientation === 'landscape',
