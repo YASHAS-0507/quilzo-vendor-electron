@@ -331,7 +331,7 @@ ipcMain.handle('print-pdf', async (event, { url, orientation, side, copies, prin
 
   // FIX 3: wait for did-stop-loading (fires after PDF pages fully rendered)
   // rather than relying on a fixed 2000ms timeout which fails for large PDFs
-  pdfWin.loadURL(`file://${tmpFile}`);
+  pdfWin.loadURL(`file:///${tmpFile.replace(/\\/g, '/')}`);
   await new Promise((resolve) => {
     pdfWin.webContents.once('did-stop-loading', () => setTimeout(resolve, 500));
   });
