@@ -1,6 +1,7 @@
-const { app, BrowserWindow, Notification, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, Notification, ipcMain, dialog, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 let mainWindow;
 
@@ -295,22 +296,48 @@ ipcMain.handle('set-printer-order', async (event, payload) => {
   return { success: true };
 });
 
-ipcMain.handle('print-pdf', async (event, { url, orientation, side, copies, print_type, paper_size }) => {
+ipcMain.handle('print-pdf', async (event, { url, orientation, side, copies, print_type, paper_size, printer }) => {
+  // Download PDF to temp file first — avoids Electron bug #30947 where
+  // webContents.print() produces blank/dark pages when printing a PDF loaded
+  // via HTTPS URL. Loading via file:// protocol prints correctly.
+  const tmpFile = path.join(os.tmpdir(), `quilzo_print_${Date.now()}.pdf`);
+
+  await new Promise((resolve, reject) => {
+    // useSessionCookies: true carries the Railway auth cookies so the token-
+    // gated /get-pdf/ endpoint sees a valid session
+    const request = net.request({ url, useSessionCookies: true });
+    const chunks = [];
+    request.on('response', (response) => {
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        try { fs.writeFileSync(tmpFile, Buffer.concat(chunks)); resolve(); }
+        catch(e) { reject(e); }
+      });
+      response.on('error', reject);
+    });
+    request.on('error', reject);
+    request.end();
+  });
+
   const pdfWin = new BrowserWindow({
     width: 900,
     height: 700,
     show: false,
-    webPreferences: { contextIsolation: true, nodeIntegration: false }
+    webPreferences: { contextIsolation: true, nodeIntegration: false, plugins: true }
   });
 
-  await pdfWin.loadURL(url);
+  await pdfWin.loadURL(`file://${tmpFile}`);
+
+  const cleanup = () => setTimeout(() => { try { fs.unlinkSync(tmpFile); } catch(e) {} }, 5000);
 
   try {
-    const result = await smartPrint(pdfWin, { orientation, side, copies, print_type, paper_size });
+    const result = await smartPrint(pdfWin, { orientation, side, copies, print_type, paper_size, printer });
     pdfWin.close();
+    cleanup();
     return result;
   } catch(e) {
     pdfWin.close();
+    cleanup();
     return { success: false, error: e.message };
   }
 });
