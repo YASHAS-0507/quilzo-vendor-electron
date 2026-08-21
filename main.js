@@ -303,12 +303,15 @@ ipcMain.handle('print-pdf', async (event, { url, orientation, side, copies, prin
   // FIX 2: random suffix prevents collision if two jobs arrive within the same ms
   const tmpFile = path.join(os.tmpdir(), `quilzo_print_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.pdf`);
 
+  // Extract cookies from the main window session and pass them manually —
+  // net.request does not expose a per-session .net property; instead we
+  // read the cookies and set the Cookie header directly
+  const cookies = await mainWindow.webContents.session.cookies.get({ url });
+  const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
   await new Promise((resolve, reject) => {
-    // FIX 1: use mainWindow's session explicitly so Railway auth cookies are sent —
-    // module-level net.request uses defaultSession which may differ from the
-    // logged-in dashboard window's session if a partition is ever configured
-    const mainSession = mainWindow.webContents.session;
-    const request = mainSession.net.request({ method: 'GET', url });
+    const request = net.request({ method: 'GET', url });
+    if (cookieHeader) request.setHeader('Cookie', cookieHeader);
     const chunks = [];
     request.on('response', (response) => {
       response.on('data', (chunk) => chunks.push(chunk));
