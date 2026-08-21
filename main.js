@@ -300,12 +300,15 @@ ipcMain.handle('print-pdf', async (event, { url, orientation, side, copies, prin
   // Download PDF to temp file first — avoids Electron bug #30947 where
   // webContents.print() produces blank/dark pages when printing a PDF loaded
   // via HTTPS URL. Loading via file:// protocol prints correctly.
-  const tmpFile = path.join(os.tmpdir(), `quilzo_print_${Date.now()}.pdf`);
+  // FIX 2: random suffix prevents collision if two jobs arrive within the same ms
+  const tmpFile = path.join(os.tmpdir(), `quilzo_print_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.pdf`);
 
   await new Promise((resolve, reject) => {
-    // useSessionCookies: true carries the Railway auth cookies so the token-
-    // gated /get-pdf/ endpoint sees a valid session
-    const request = net.request({ url, useSessionCookies: true });
+    // FIX 1: use mainWindow's session explicitly so Railway auth cookies are sent —
+    // module-level net.request uses defaultSession which may differ from the
+    // logged-in dashboard window's session if a partition is ever configured
+    const mainSession = mainWindow.webContents.session;
+    const request = mainSession.net.request({ method: 'GET', url });
     const chunks = [];
     request.on('response', (response) => {
       response.on('data', (chunk) => chunks.push(chunk));
@@ -326,7 +329,12 @@ ipcMain.handle('print-pdf', async (event, { url, orientation, side, copies, prin
     webPreferences: { contextIsolation: true, nodeIntegration: false, plugins: true }
   });
 
-  await pdfWin.loadURL(`file://${tmpFile}`);
+  // FIX 3: wait for did-stop-loading (fires after PDF pages fully rendered)
+  // rather than relying on a fixed 2000ms timeout which fails for large PDFs
+  pdfWin.loadURL(`file://${tmpFile}`);
+  await new Promise((resolve) => {
+    pdfWin.webContents.once('did-stop-loading', () => setTimeout(resolve, 500));
+  });
 
   const cleanup = () => setTimeout(() => { try { fs.unlinkSync(tmpFile); } catch(e) {} }, 5000);
 
