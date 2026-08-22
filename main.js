@@ -264,6 +264,30 @@ function createWindow() {
       mainWindow.webContents.reload();
     }
   }, 2 * 60 * 60 * 1000);
+
+  // ── FIX 3: NAVIGATION LOCK ──
+  const ALLOWED_URL = 'https://web-production-cf36.up.railway.app';
+
+  mainWindow.webContents.on('will-navigate', (e, navUrl) => {
+    if (!navUrl.startsWith(ALLOWED_URL)) {
+      e.preventDefault();
+      console.log('[SECURITY] Blocked navigation to:', navUrl);
+    }
+  });
+
+  // ── AUTO-LOCK after 30min inactivity ──
+  let _lockTimer;
+  function resetLockTimer() {
+    clearTimeout(_lockTimer);
+    _lockTimer = setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.loadURL(ALLOWED_URL + '/logout');
+        console.log('[SECURITY] Auto-locked after 30min inactivity');
+      }
+    }, 30 * 60 * 1000);
+  }
+  mainWindow.webContents.on('before-input-event', () => resetLockTimer());
+  resetLockTimer();
 }
 
 // ── IPC HANDLERS ──
@@ -334,12 +358,18 @@ ipcMain.handle('print-pdf', async (event, { url, orientation, side, copies, prin
 
   // FIX 3: wait for did-stop-loading (fires after PDF pages fully rendered)
   // rather than relying on a fixed 2000ms timeout which fails for large PDFs
-  pdfWin.loadURL(`file:///${tmpFile.replace(/\\/g, '/')}`);
+  // FIX 1: load as base64 data URL — avoids Windows "You'll need a new app"
+  // popup that file:// paths trigger via Windows file association system
+  const pdfBytes = fs.readFileSync(tmpFile);
+  const dataUrl = `data:application/pdf;base64,${pdfBytes.toString('base64')}`;
+  try { fs.unlinkSync(tmpFile); } catch(e) {}  // temp file no longer needed
+
+  pdfWin.loadURL(dataUrl);
   await new Promise((resolve) => {
     pdfWin.webContents.once('did-stop-loading', () => setTimeout(resolve, 500));
   });
 
-  const cleanup = () => setTimeout(() => { try { fs.unlinkSync(tmpFile); } catch(e) {} }, 5000);
+  const cleanup = () => {}; // temp file already deleted above
 
   try {
     const result = await smartPrint(pdfWin, { orientation, side, copies, print_type, paper_size, printer });
