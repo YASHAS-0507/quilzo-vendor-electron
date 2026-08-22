@@ -338,6 +338,8 @@ ipcMain.handle('print-pdf', async (event, { url, orientation, side, copies, prin
     if (cookieHeader) request.setHeader('Cookie', cookieHeader);
     const chunks = [];
     request.on('response', (response) => {
+      const detectedOrientation = response.headers['x-detected-orientation'] || null;
+      if (detectedOrientation) orientation = detectedOrientation;
       response.on('data', (chunk) => chunks.push(chunk));
       response.on('end', () => {
         try { fs.writeFileSync(tmpFile, Buffer.concat(chunks)); resolve(); }
