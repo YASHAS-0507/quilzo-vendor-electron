@@ -2,6 +2,7 @@ const { app, BrowserWindow, Notification, ipcMain, dialog, net } = require('elec
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const ptp = require('pdf-to-printer');
 
 let mainWindow;
 
@@ -80,7 +81,7 @@ async function selectBestPrinter(webContents, print_type = 'BW', paper_size = 'A
 }
 
 // ── SMART PRINT FUNCTION ──
-async function smartPrint(pdfWindow, options = {}) {
+async function smartPrint(tmpFilePath, options = {}) {
   const {
     orientation = 'portrait',
     side = 'double',
@@ -89,7 +90,7 @@ async function smartPrint(pdfWindow, options = {}) {
     paper_size = 'A4',
   } = options;
 
-  const printerName = await selectBestPrinter(pdfWindow.webContents, print_type, paper_size);
+  const printerName = await selectBestPrinter(mainWindow.webContents, print_type, paper_size);
   console.log(`[PRINT] printer=${printerName} | paper=${paper_size} | type=${print_type} | orientation=${orientation} | side=${side}`);
 
   const isColor = print_type === 'Color';
@@ -97,29 +98,20 @@ async function smartPrint(pdfWindow, options = {}) {
   const isDoubleSided = side !== 'single' && side !== 'simplex';
 
   const printOptions = {
-    silent: true,
-    deviceName: printerName || '',
-    color: isColor,
-    printBackground: isColor,
-    usePrinterDefaultPageSize: true,
-    landscape: isA3,
-    duplexMode: isA3 ? 'simplex' : (isDoubleSided ? 'longEdge' : 'simplex'),
+    printer: printerName || undefined,
+    paperSize: isA3 ? 'A3' : 'A4',
+    monochrome: !isColor,
+    side: isA3 ? 'simplex' : (isDoubleSided ? 'duplex' : 'simplex'),
+    orientation: isA3 ? 'landscape' : 'portrait',
     copies: parseInt(copies) || 1,
+    scale: 'noscale',
   };
 
   console.log('[PRINT] Final options:', JSON.stringify(printOptions));
 
-  return new Promise((resolve, reject) => {
-    pdfWindow.webContents.print(printOptions, (success, errorType) => {
-      if (success) {
-        console.log(`[PRINT] ✅ Printed successfully on ${printerName}`);
-        resolve({ success: true, printer: printerName });
-      } else {
-        console.log(`[PRINT] ❌ Failed: ${errorType} on ${printerName}`);
-        reject(new Error(errorType));
-      }
-    });
-  });
+  await ptp.print(tmpFilePath, printOptions);
+  console.log(`[PRINT] ✅ Printed successfully on ${printerName}`);
+  return { success: true, printer: printerName };
 }
 
 function createWindow() {
@@ -350,37 +342,13 @@ ipcMain.handle('print-pdf', async (event, { url, orientation, side, copies, prin
     request.end();
   });
 
-  const pdfWin = new BrowserWindow({
-    width: 900,
-    height: 700,
-    show: false,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, plugins: true }
-  });
-
-  // FIX 3: wait for did-stop-loading (fires after PDF pages fully rendered)
-  // rather than relying on a fixed 2000ms timeout which fails for large PDFs
-  // FIX 1: load as base64 data URL — avoids Windows "You'll need a new app"
-  // popup that file:// paths trigger via Windows file association system
-  const pdfBytes = fs.readFileSync(tmpFile);
-  const dataUrl = `data:application/pdf;base64,${pdfBytes.toString('base64')}`;
-  try { fs.unlinkSync(tmpFile); } catch(e) {}  // temp file no longer needed
-
-  pdfWin.loadURL(dataUrl);
-  await new Promise((resolve) => {
-    pdfWin.webContents.once('did-stop-loading', () => setTimeout(resolve, 500));
-  });
-
-  const cleanup = () => {}; // temp file already deleted above
-
   try {
-    const result = await smartPrint(pdfWin, { orientation, side, copies, print_type, paper_size, printer });
-    pdfWin.close();
-    cleanup();
+    const result = await smartPrint(tmpFile, { orientation, side, copies, print_type, paper_size });
     return result;
   } catch(e) {
-    pdfWin.close();
-    cleanup();
     return { success: false, error: e.message };
+  } finally {
+    try { fs.unlinkSync(tmpFile); } catch(_) {}
   }
 });
 
