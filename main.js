@@ -55,8 +55,20 @@ async function selectBestPrinter(webContents, print_type = 'BW', paper_size = 'A
   printers.forEach(p => printerMap[p.name] = p);
 
   for (const name of orderedNames) {
-    const printer = printerMap[name];
-    if (!printer) continue;
+    // Exact match first
+    let printer = printerMap[name];
+    // Fuzzy match if exact fails — handles "(Copy 1)" suffix mismatches
+    if (!printer) {
+      const nameLower = name.toLowerCase();
+      printer = printers.find(p =>
+        p.name.toLowerCase().includes(nameLower) ||
+        nameLower.includes(p.name.toLowerCase())
+      );
+    }
+    if (!printer) {
+      console.log(`[PRINT] ⚠️ Printer not found: "${name}"`);
+      continue;
+    }
     const status = printer.status || 0;
     if (status !== 5 && status !== 4) {
       return printer.name;
