@@ -71,6 +71,7 @@ async function selectBestPrinter(webContents, print_type = 'BW', paper_size = 'A
     }
     const status = printer.status || 0;
     if (status !== 5 && status !== 4) {
+      console.log(`[PRINT] Resolved printer: "${name}" → "${printer.name}"`);
       return printer.name;
     }
   }
@@ -92,13 +93,15 @@ async function smartPrint(pdfWindow, options = {}) {
   console.log(`[PRINT] printer=${printerName} | paper=${paper_size} | type=${print_type} | orientation=${orientation} | side=${side}`);
 
   let printOptions;
+  const isColor = print_type === 'Color';
+
   if (paper_size === 'A3') {
     // A3 engineering drawing — BIS/ISO standard settings
     // Scale accuracy is critical: never scale, always single-side, no margin override
     printOptions = {
       silent: true,
-      printBackground: false,
-      color: print_type === 'Color',
+      printBackground: isColor,
+      color: isColor,
       deviceName: printerName || '',
       copies: parseInt(copies) || 1,
       landscape: orientation !== 'portrait', // default landscape for A3
@@ -110,8 +113,8 @@ async function smartPrint(pdfWindow, options = {}) {
   } else {
     printOptions = {
       silent: true,
-      printBackground: false,
-      color: print_type === 'Color',
+      printBackground: isColor,
+      color: isColor,
       deviceName: printerName || '',
       copies: parseInt(copies) || 1,
       landscape: orientation === 'landscape',
@@ -121,6 +124,8 @@ async function smartPrint(pdfWindow, options = {}) {
       scaleFactor: 100,
     };
   }
+
+  console.log('[PRINT] Final options:', JSON.stringify(printOptions));
 
   return new Promise((resolve, reject) => {
     pdfWindow.webContents.print(printOptions, (success, errorType) => {
