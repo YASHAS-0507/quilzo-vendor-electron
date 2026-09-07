@@ -92,38 +92,20 @@ async function smartPrint(pdfWindow, options = {}) {
   const printerName = await selectBestPrinter(pdfWindow.webContents, print_type, paper_size);
   console.log(`[PRINT] printer=${printerName} | paper=${paper_size} | type=${print_type} | orientation=${orientation} | side=${side}`);
 
-  let printOptions;
   const isColor = print_type === 'Color';
+  const isA3 = paper_size === 'A3';
+  const isDoubleSided = side !== 'single' && side !== 'simplex';
 
-  if (paper_size === 'A3') {
-    // A3 engineering drawing — BIS/ISO standard settings
-    // Scale accuracy is critical: never scale, always single-side, no margin override
-    printOptions = {
-      silent: true,
-      printBackground: isColor,
-      color: isColor,
-      deviceName: printerName || '',
-      copies: parseInt(copies) || 1,
-      landscape: orientation !== 'portrait', // default landscape for A3
-      pageSize: { width: 420000, height: 297000 }, // landscape A3 in microns
-      scaleFactor: 100,       // CRITICAL: never scale engineering drawings
-      duplexMode: 'simplex',  // always single-sided for A3 sheets
-      margins: { marginType: 'none' }, // drawing carries its own BIS margins
-    };
-  } else {
-    printOptions = {
-      silent: true,
-      printBackground: isColor,
-      color: isColor,
-      deviceName: printerName || '',
-      copies: parseInt(copies) || 1,
-      landscape: orientation === 'landscape',
-      pageSize: 'A4',
-      duplexMode: side === 'double' ? 'longEdge' : 'simplex',
-      margins: { marginType: 'printableArea' },
-      scaleFactor: 100,
-    };
-  }
+  const printOptions = {
+    silent: true,
+    deviceName: printerName || '',
+    color: isColor,
+    printBackground: isColor,
+    usePrinterDefaultPageSize: true,
+    landscape: isA3,
+    duplexMode: isA3 ? 'simplex' : (isDoubleSided ? 'longEdge' : 'simplex'),
+    copies: parseInt(copies) || 1,
+  };
 
   console.log('[PRINT] Final options:', JSON.stringify(printOptions));
 
