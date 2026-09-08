@@ -7,13 +7,19 @@
     "start": "electron .",
     "build": "electron-builder"
   },
+  "dependencies": {
+    "pdf-to-printer": "^5.8.1"
+  },
   "build": {
     "appId": "com.quilzo.vendordashboard",
     "productName": "Quilzo Vendor",
     "win": {
       "target": "nsis",
       "signAndEditExecutable": false
-    }
+    },
+    "asarUnpack": [
+      "node_modules/pdf-to-printer/**"
+    ]
   },
   "devDependencies": {
     "electron": "33.4.11",
