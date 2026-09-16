@@ -26,6 +26,15 @@ function saveSettings(settings) {
   } catch(e) {}
 }
 
+// ── PRINT FILE LOGGER ──
+const LOG_PATH = path.join(app.getPath('userData'), 'print-debug.log');
+
+function logPrint(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  try { fs.appendFileSync(LOG_PATH, line); } catch (_) {}
+  console.log(line.trim());
+}
+
 // ── SMART PRINTER SELECTION ──
 async function getAvailablePrinters(webContents) {
   try {
@@ -67,12 +76,12 @@ async function selectBestPrinter(webContents, print_type = 'BW', paper_size = 'A
       );
     }
     if (!printer) {
-      console.log(`[PRINT] ⚠️ Printer not found: "${name}"`);
+      logPrint(`[PRINT] ⚠️ Printer not found: "${name}"`);
       continue;
     }
     const status = printer.status || 0;
     if (status !== 5 && status !== 4) {
-      console.log(`[PRINT] Resolved printer: "${name}" → "${printer.name}"`);
+      logPrint(`[PRINT] Resolved printer: "${name}" → "${printer.name}"`);
       return printer.name;
     }
   }
@@ -91,7 +100,7 @@ async function smartPrint(tmpFilePath, options = {}) {
   } = options;
 
   const printerName = await selectBestPrinter(mainWindow.webContents, print_type, paper_size);
-  console.log(`[PRINT] printer=${printerName} | paper=${paper_size} | type=${print_type} | orientation=${orientation} | side=${side}`);
+  logPrint(`[PRINT] printer=${printerName} | paper=${paper_size} | type=${print_type} | orientation=${orientation} | side=${side}`);
 
   const isColor = print_type === 'Color';
   const isA3 = paper_size === 'A3';
@@ -105,13 +114,22 @@ async function smartPrint(tmpFilePath, options = {}) {
     orientation: isA3 ? 'landscape' : 'portrait',
     copies: parseInt(copies) || 1,
     scale: 'noscale',
+    silent: false,
   };
 
-  console.log('[PRINT] Final options:', JSON.stringify(printOptions));
+  logPrint('[PRINT] Final options: ' + JSON.stringify(printOptions));
 
-  await ptp.print(tmpFilePath, printOptions);
-  console.log(`[PRINT] ✅ Printed successfully on ${printerName}`);
-  return { success: true, printer: printerName };
+  try {
+    await ptp.print(tmpFilePath, printOptions);
+    logPrint(`[PRINT] ✅ Printed successfully on ${printerName}`);
+    return { success: true, printer: printerName };
+  } catch (printErr) {
+    logPrint(`[PRINT] ❌ ptp.print() failed: ${printErr.message}`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('print-error', { error: printErr.message, printer: printerName });
+    }
+    throw printErr;
+  }
 }
 
 function createWindow() {
@@ -127,6 +145,20 @@ function createWindow() {
   });
 
   mainWindow.loadURL(DASHBOARD_URL);
+
+  // ── PRINTER DIAGNOSTICS ON STARTUP ──
+  mainWindow.webContents.once('did-finish-load', async () => {
+    try {
+      const printers = await mainWindow.webContents.getPrintersAsync();
+      const settings = loadSettings();
+      logPrint(`[DIAG] Available printers (${printers.length}): ${printers.map(p => `"${p.name}"(status=${p.status})`).join(', ')}`);
+      logPrint(`[DIAG] BW pool: ${JSON.stringify(settings.bwPrinterOrder)}`);
+      logPrint(`[DIAG] Color pool: ${JSON.stringify(settings.colorPrinterOrder)}`);
+      logPrint(`[DIAG] A3 pool: ${JSON.stringify(settings.a3PrinterOrder)}`);
+    } catch (e) {
+      logPrint(`[DIAG] Failed to list printers: ${e.message}`);
+    }
+  });
 
   // ── INTERCEPT PDF POPUPS ──
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
