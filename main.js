@@ -2,7 +2,6 @@ const { app, BrowserWindow, Notification, ipcMain, dialog, net } = require('elec
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const ptp = require('pdf-to-printer');
 
 let mainWindow;
 
@@ -24,15 +23,6 @@ function saveSettings(settings) {
   try {
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
   } catch(e) {}
-}
-
-// ── PRINT FILE LOGGER ──
-const LOG_PATH = path.join(app.getPath('userData'), 'print-debug.log');
-
-function logPrint(msg) {
-  const line = `[${new Date().toISOString()}] ${msg}\n`;
-  try { fs.appendFileSync(LOG_PATH, line); } catch (_) {}
-  console.log(line.trim());
 }
 
 // ── SMART PRINTER SELECTION ──
@@ -64,76 +54,31 @@ async function selectBestPrinter(webContents, print_type = 'BW', paper_size = 'A
   const printerMap = {};
   printers.forEach(p => printerMap[p.name] = p);
 
-  for (const name of orderedNames) {
-    const lower = name.toLowerCase();
-    let printer = null;
-    let level = 0;
-
-    // Priority 1 — exact name match
-    if (printerMap[name]) {
-      printer = printerMap[name];
-      level = 1;
-    }
-
-    // Priority 2 — case-insensitive exact match
+    for (const name of orderedNames) {
+    // Exact match first
+    let printer = printerMap[name];
+    // Fuzzy match if exact fails — handles "(Copy 1)" suffix mismatches
     if (!printer) {
-      printer = printers.find(p => p.name.toLowerCase() === lower);
-      if (printer) level = 2;
-    }
-
-    // Priority 3 — substring match in either direction
-    if (!printer) {
+      const nameLower = name.toLowerCase();
       printer = printers.find(p =>
-        p.name.toLowerCase().includes(lower) || lower.includes(p.name.toLowerCase())
+        p.name.toLowerCase().includes(nameLower) ||
+        nameLower.includes(p.name.toLowerCase())
       );
-      if (printer) level = 3;
     }
-
-    // Priority 4 — Canon model number match (e.g. "4545" in "Canon iR-ADV 4545 PCL6")
     if (!printer) {
-      const canonModel = lower.match(/(\d{4})/);
-      if (lower.includes('canon') && canonModel) {
-        printer = printers.find(p => {
-          const pl = p.name.toLowerCase();
-          return pl.includes('canon') && pl.includes(canonModel[1]);
-        });
-        if (printer) level = 4;
-      }
-    }
-
-    // Priority 5 — brand safety net (epson, xerox)
-    if (!printer) {
-      if (lower.includes('epson')) {
-        printer = printers.find(p => p.name.toLowerCase().includes('epson'));
-        if (printer) level = 5;
-      } else if (lower.includes('xerox')) {
-        printer = printers.find(p => p.name.toLowerCase().includes('xerox'));
-        if (printer) level = 5;
-      }
-    }
-
-    if (!printer) {
-      logPrint(`[PRINT] ⚠️ No match for "${name}" | available: ${printers.map(p => `"${p.name}"`).join(', ')}`);
+      console.log(`[PRINT] ⚠️ Printer not found: "${name}"`);
       continue;
     }
-
     const status = printer.status || 0;
-    // status 4 = currently printing (not offline) — allow
-    // status 5 = offline/error — skip
-    if (status === 5) {
-      logPrint(`[PRINT] ⚠️ Printer offline (status 5): "${printer.name}" — skipping`);
-      continue;
+    if (status !== 5 && status !== 4) {
+      return printer.name;
     }
-
-    logPrint(`[PRINT] Matched "${name}" → "${printer.name}" via Priority ${level} (status=${status})`);
-    return printer.name;
   }
-
   return printers[0]?.name || null;
 }
 
 // ── SMART PRINT FUNCTION ──
-async function smartPrint(tmpFilePath, options = {}) {
+async function smartPrint(pdfWindow, options = {}) {
   const {
     orientation = 'portrait',
     side = 'double',
@@ -142,37 +87,51 @@ async function smartPrint(tmpFilePath, options = {}) {
     paper_size = 'A4',
   } = options;
 
-  const printerName = await selectBestPrinter(mainWindow.webContents, print_type, paper_size);
-  logPrint(`[PRINT] printer=${printerName} | paper=${paper_size} | type=${print_type} | orientation=${orientation} | side=${side}`);
+  const printerName = await selectBestPrinter(pdfWindow.webContents, print_type, paper_size);
+  console.log(`[PRINT] printer=${printerName} | paper=${paper_size} | type=${print_type} | orientation=${orientation} | side=${side}`);
 
-  const isColor = print_type === 'Color';
-  const isA3 = paper_size === 'A3';
-  const isDoubleSided = side !== 'single' && side !== 'simplex';
-
-  const printOptions = {
-    printer: printerName || undefined,
-    paperSize: isA3 ? 'A3' : 'A4',
-    monochrome: !isColor,
-    side: isA3 ? 'simplex' : (isDoubleSided ? 'duplex' : 'simplex'),
-    orientation: isA3 ? 'landscape' : 'portrait',
-    copies: parseInt(copies) || 1,
-    scale: 'noscale',
-    silent: false,
-  };
-
-  logPrint('[PRINT] Final options: ' + JSON.stringify(printOptions));
-
-  try {
-    await ptp.print(tmpFilePath, printOptions);
-    logPrint(`[PRINT] ✅ Printed successfully on ${printerName}`);
-    return { success: true, printer: printerName };
-  } catch (printErr) {
-    logPrint(`[PRINT] ❌ ptp.print() failed: ${printErr.message}`);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('print-error', { error: printErr.message, printer: printerName });
-    }
-    throw printErr;
+  let printOptions;
+  if (paper_size === 'A3') {
+    // A3 engineering drawing — BIS/ISO standard settings
+    // Scale accuracy is critical: never scale, always single-side, no margin override
+    printOptions = {
+      silent: true,
+      printBackground: false,
+      color: print_type === 'Color',
+      deviceName: printerName || '',
+      copies: parseInt(copies) || 1,
+      landscape: orientation !== 'portrait', // default landscape for A3
+      pageSize: { width: 420000, height: 297000 }, // landscape A3 in microns
+      scaleFactor: 100,       // CRITICAL: never scale engineering drawings
+      duplexMode: 'simplex',  // always single-sided for A3 sheets
+      margins: { marginType: 'none' }, // drawing carries its own BIS margins
+    };
+  } else {
+    printOptions = {
+      silent: true,
+      printBackground: false,
+      color: print_type === 'Color',
+      deviceName: printerName || '',
+      copies: parseInt(copies) || 1,
+      landscape: orientation === 'landscape',
+      pageSize: 'A4',
+      duplexMode: side === 'double' ? 'longEdge' : 'simplex',
+      margins: { marginType: 'printableArea' },
+      scaleFactor: 100,
+    };
   }
+
+  return new Promise((resolve, reject) => {
+    pdfWindow.webContents.print(printOptions, (success, errorType) => {
+      if (success) {
+        console.log(`[PRINT] ✅ Printed successfully on ${printerName}`);
+        resolve({ success: true, printer: printerName });
+      } else {
+        console.log(`[PRINT] ❌ Failed: ${errorType} on ${printerName}`);
+        reject(new Error(errorType));
+      }
+    });
+  });
 }
 
 function createWindow() {
@@ -188,20 +147,6 @@ function createWindow() {
   });
 
   mainWindow.loadURL(DASHBOARD_URL);
-
-  // ── PRINTER DIAGNOSTICS ON STARTUP ──
-  mainWindow.webContents.once('did-finish-load', async () => {
-    try {
-      const printers = await mainWindow.webContents.getPrintersAsync();
-      const settings = loadSettings();
-      logPrint(`[DIAG] Available printers (${printers.length}): ${printers.map(p => `"${p.name}"(status=${p.status})`).join(', ')}`);
-      logPrint(`[DIAG] BW pool: ${JSON.stringify(settings.bwPrinterOrder)}`);
-      logPrint(`[DIAG] Color pool: ${JSON.stringify(settings.colorPrinterOrder)}`);
-      logPrint(`[DIAG] A3 pool: ${JSON.stringify(settings.a3PrinterOrder)}`);
-    } catch (e) {
-      logPrint(`[DIAG] Failed to list printers: ${e.message}`);
-    }
-  });
 
   // ── INTERCEPT PDF POPUPS ──
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -417,13 +362,37 @@ ipcMain.handle('print-pdf', async (event, { url, orientation, side, copies, prin
     request.end();
   });
 
+  const pdfWin = new BrowserWindow({
+    width: 900,
+    height: 700,
+    show: false,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, plugins: true }
+  });
+
+  // FIX 3: wait for did-stop-loading (fires after PDF pages fully rendered)
+  // rather than relying on a fixed 2000ms timeout which fails for large PDFs
+  // FIX 1: load as base64 data URL — avoids Windows "You'll need a new app"
+  // popup that file:// paths trigger via Windows file association system
+  const pdfBytes = fs.readFileSync(tmpFile);
+  const dataUrl = `data:application/pdf;base64,${pdfBytes.toString('base64')}`;
+  try { fs.unlinkSync(tmpFile); } catch(e) {}  // temp file no longer needed
+
+  pdfWin.loadURL(dataUrl);
+  await new Promise((resolve) => {
+    pdfWin.webContents.once('did-stop-loading', () => setTimeout(resolve, 500));
+  });
+
+  const cleanup = () => {}; // temp file already deleted above
+
   try {
-    const result = await smartPrint(tmpFile, { orientation, side, copies, print_type, paper_size });
+    const result = await smartPrint(pdfWin, { orientation, side, copies, print_type, paper_size, printer });
+    pdfWin.close();
+    cleanup();
     return result;
   } catch(e) {
+    pdfWin.close();
+    cleanup();
     return { success: false, error: e.message };
-  } finally {
-    try { fs.unlinkSync(tmpFile); } catch(_) {}
   }
 });
 

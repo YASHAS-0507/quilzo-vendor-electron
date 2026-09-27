@@ -24,5 +24,8 @@
   "devDependencies": {
     "electron": "33.4.11",
     "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "pdf-to-printer": "^5.8.1"
   }
 }
