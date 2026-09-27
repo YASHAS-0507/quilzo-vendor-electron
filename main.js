@@ -65,25 +65,68 @@ async function selectBestPrinter(webContents, print_type = 'BW', paper_size = 'A
   printers.forEach(p => printerMap[p.name] = p);
 
   for (const name of orderedNames) {
-    // Exact match first
-    let printer = printerMap[name];
-    // Fuzzy match if exact fails — handles "(Copy 1)" suffix mismatches
-    if (!printer) {
-      const nameLower = name.toLowerCase();
-      printer = printers.find(p =>
-        p.name.toLowerCase().includes(nameLower) ||
-        nameLower.includes(p.name.toLowerCase())
-      );
+    const lower = name.toLowerCase();
+    let printer = null;
+    let level = 0;
+
+    // Priority 1 — exact name match
+    if (printerMap[name]) {
+      printer = printerMap[name];
+      level = 1;
     }
+
+    // Priority 2 — case-insensitive exact match
     if (!printer) {
-      logPrint(`[PRINT] ⚠️ Printer not found: "${name}"`);
+      printer = printers.find(p => p.name.toLowerCase() === lower);
+      if (printer) level = 2;
+    }
+
+    // Priority 3 — substring match in either direction
+    if (!printer) {
+      printer = printers.find(p =>
+        p.name.toLowerCase().includes(lower) || lower.includes(p.name.toLowerCase())
+      );
+      if (printer) level = 3;
+    }
+
+    // Priority 4 — Canon model number match (e.g. "4545" in "Canon iR-ADV 4545 PCL6")
+    if (!printer) {
+      const canonModel = lower.match(/(\d{4})/);
+      if (lower.includes('canon') && canonModel) {
+        printer = printers.find(p => {
+          const pl = p.name.toLowerCase();
+          return pl.includes('canon') && pl.includes(canonModel[1]);
+        });
+        if (printer) level = 4;
+      }
+    }
+
+    // Priority 5 — brand safety net (epson, xerox)
+    if (!printer) {
+      if (lower.includes('epson')) {
+        printer = printers.find(p => p.name.toLowerCase().includes('epson'));
+        if (printer) level = 5;
+      } else if (lower.includes('xerox')) {
+        printer = printers.find(p => p.name.toLowerCase().includes('xerox'));
+        if (printer) level = 5;
+      }
+    }
+
+    if (!printer) {
+      logPrint(`[PRINT] ⚠️ No match for "${name}" | available: ${printers.map(p => `"${p.name}"`).join(', ')}`);
       continue;
     }
+
     const status = printer.status || 0;
-    if (status !== 5 && status !== 4) {
-      logPrint(`[PRINT] Resolved printer: "${name}" → "${printer.name}"`);
-      return printer.name;
+    // status 4 = currently printing (not offline) — allow
+    // status 5 = offline/error — skip
+    if (status === 5) {
+      logPrint(`[PRINT] ⚠️ Printer offline (status 5): "${printer.name}" — skipping`);
+      continue;
     }
+
+    logPrint(`[PRINT] Matched "${name}" → "${printer.name}" via Priority ${level} (status=${status})`);
+    return printer.name;
   }
 
   return printers[0]?.name || null;
